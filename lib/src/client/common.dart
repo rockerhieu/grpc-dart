@@ -44,7 +44,7 @@ abstract class Response {
 /// A gRPC response producing a single value.
 class ResponseFuture<R> extends DelegatingFuture<R>
     with _ResponseMixin<dynamic, R> {
-  final ClientCall<dynamic, R> _call;
+  final ClientCall _call;
 
   static R _ensureOnlyOneResponse<R>(R previous, R element) {
     if (previous != null) {
@@ -58,10 +58,51 @@ class ResponseFuture<R> extends DelegatingFuture<R>
     return value;
   }
 
-  ResponseFuture(this._call)
-      : super(_call.response
+  ResponseFuture(ClientCall<dynamic, R> call)
+      : _call = call,
+        super(call.response
             .fold(null, _ensureOnlyOneResponse)
             .then(_ensureOneResponse));
+
+  ResponseFuture._clone(Future<R> future, {ClientCall clientCall})
+      : _call = clientCall,
+        super(future);
+
+  ResponseFuture<S> copy<S>(Future<S> future) =>
+      ResponseFuture._clone(future, clientCall: _getClientCall(future, _call));
+
+  /// clientCall maybe be lost when converting from Future to ResponseFuture
+  static ResponseFuture<T> wrap<T>(Future<T> future, {ClientCall clientCall}) {
+    return ResponseFuture._clone(
+      future,
+      clientCall: (_getClientCall(future, clientCall)),
+    );
+  }
+
+  static ClientCall _getClientCall(Future future, [ClientCall fallback]) {
+    return (future is ResponseFuture ? future._call : null) ?? fallback;
+  }
+
+  @override
+  ResponseFuture<S> then<S>(FutureOr<S> Function(R p1) onValue,
+      {Function onError}) {
+    return copy(super.then(onValue, onError: onError));
+  }
+
+  @override
+  Future<R> catchError(Function onError, {bool Function(Object error) test}) {
+    return copy(super.catchError(onError, test: test));
+  }
+
+  @override
+  Future<R> whenComplete(FutureOr Function() action) {
+    return copy(super.whenComplete(action));
+  }
+
+  @override
+  Future<R> timeout(Duration timeLimit, {FutureOr<R> Function() onTimeout}) {
+    return copy(super.timeout(timeLimit, onTimeout: onTimeout));
+  }
 }
 
 /// A gRPC response producing a stream of values.
@@ -75,7 +116,7 @@ class ResponseStream<R> extends DelegatingStream<R>
 }
 
 abstract class _ResponseMixin<Q, R> implements Response {
-  ClientCall<Q, R> get _call;
+  ClientCall get _call;
 
   @override
   Future<Map<String, String>> get headers => _call.headers;
@@ -84,5 +125,5 @@ abstract class _ResponseMixin<Q, R> implements Response {
   Future<Map<String, String>> get trailers => _call.trailers;
 
   @override
-  Future<void> cancel() => _call.cancel();
+  Future<void> cancel() => _call?.cancel();
 }
